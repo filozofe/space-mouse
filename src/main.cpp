@@ -15,6 +15,7 @@ SimpleKalmanFilter xFilter(1, 1, 0.2), yFilter(1, 1, 0.2), zFilter(1, 1, 0.2);
 OneButton button1(10, true);
 OneButton button2(11, true);
 
+
 float xOffset = 0, yOffset = 0, zOffset = 0;
 float xCurrent = 0, yCurrent = 0, zCurrent = 0;
 
