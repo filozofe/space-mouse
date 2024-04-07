@@ -1,0 +1,110 @@
+/// #include <TinyUSB_Mouse_and_Keyboard.h>
+#define PICO_DEFAULT_I2C_SDA_PIN 12
+#define PICO_DEFAULT_I2C_SCL_PIN 13
+#include <Arduino.h>
+#include <Wire.h>
+#include <Tlv493d.h>
+#include <SimpleKalmanFilter.h>
+
+Tlv493d mag = Tlv493d();
+SimpleKalmanFilter xFilter(1, 1, 0.2), yFilter(1, 1, 0.2), zFilter(1, 1, 0.2);
+
+float xOffset = 0, yOffset = 0, zOffset = 0;
+float xCurrent = 0, yCurrent = 0, zCurrent = 0;
+
+int calSamples = 300;
+int sensivity = 8;
+int magRange = 3;
+int outRange = 127;      // Max allowed in HID report
+float xyThreshold = 0.4; // Center threshold
+
+int inRange = magRange * sensivity;
+float zThreshold = xyThreshold * 1.5;
+
+bool isOrbit = false;
+
+void setup()
+{
+    Serial.begin(115200);
+    delay(10000);
+    Wire.begin();
+
+    // mag sensor init
+    mag.begin(Wire);
+    mag.setAccessMode(mag.MASTERCONTROLLEDMODE);
+    mag.disableTemp();
+
+    char text[256];
+    // crude offset calibration on first boot
+    for (int i = 1; i <= calSamples; i++)
+    {
+
+        delay(2*mag.getMeasurementDelay());
+        mag.updateData();
+
+        xOffset += mag.getX();
+        yOffset += mag.getY();
+        zOffset += mag.getZ();
+
+        sprintf(text, "x: %.3f y: %.3f z: %.3f ", mag.getX(), mag.getY(), mag.getZ());
+        Serial.println(text);
+
+        Serial.print(".");
+    }
+
+
+    Serial.println(text);
+
+    xOffset = xOffset / calSamples;
+    yOffset = yOffset / calSamples;
+    zOffset = zOffset / calSamples;
+
+    Serial.println();
+    sprintf(text, "offsets: x: %.5f y: %.5f z: %.5f ", xOffset, yOffset, zOffset);
+    Serial.println(text);
+    delay(10000);
+}
+
+void loop()
+{
+    char text[256];
+
+    // get the mag data
+    delay(mag.getMeasurementDelay());
+    mag.updateData();
+
+    // update the filters
+    xCurrent = xFilter.updateEstimate(mag.getX() - xOffset);
+    yCurrent = yFilter.updateEstimate(mag.getY() - yOffset);
+    zCurrent = zFilter.updateEstimate(mag.getZ() - zOffset);
+
+    ///sprintf(text, "x: %.3f y: %.3f z: %.3f ", xCurrent, yCurrent, zCurrent);
+    ///Serial.println(text);
+
+    // check the center threshold
+    if (abs(xCurrent) > xyThreshold || abs(yCurrent) > xyThreshold)
+    {
+
+        int xMove = 0;
+        int yMove = 0;
+
+        // map the magnetometer xy to the allowed 127 range in HID repports
+        xMove = map(xCurrent, -inRange, inRange, -outRange, outRange);
+        yMove = map(yCurrent, -inRange, inRange, -outRange, outRange);
+
+
+        // press shift to orbit in Fusion 360 if the pan threshold is not corssed (zAxis)
+        if (abs(zCurrent) < zThreshold && !isOrbit)
+        {
+            isOrbit = true;
+        }
+
+        sprintf(text, "xMove: %d yMove: %d orbit:%s", xMove, yMove, isOrbit ? "isOrbit" : "noOrbit");
+        Serial.println(text);
+        // pan or orbit by holding the middle mouse button and moving propotionaly to the xy axis
+    }
+    else
+    {
+        isOrbit = false;
+    }
+}
